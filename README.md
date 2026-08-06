@@ -90,9 +90,9 @@ Membuat akun berikut, password sama semua: **123**
 | sppg1    | sppg       |
 | sppg2    | sppg       |
 | sppg3    | sppg       |
-| mas1     | masyarakat |
-| mas2     | masyarakat |
-| mas3     | masyarakat |
+| masy1     | masyarakat |
+| masy2     | masyarakat |
+| masy3     | masyarakat |
 
 **4. Buka** `http://localhost/mbg-app-frontend/` di browser dan login.
 
