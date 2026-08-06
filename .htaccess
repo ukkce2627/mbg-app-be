@@ -1,0 +1,11 @@
+RewriteEngine On
+
+# Kalau request memang untuk file/folder yang ada di sini (jarang kepakai), biarkan apa adanya
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Semua request lain (mis. /mbg-app-backend/api/...) diteruskan ke public/,
+# supaya tidak perlu menyertakan "/public/" di URL saat backend ditaruh
+# langsung sebagai subfolder (development lokal tanpa vhost terpisah).
+RewriteRule ^(.*)$ public/$1 [L]
