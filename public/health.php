@@ -56,7 +56,15 @@ function runCli(array $args): array
         2 => ['pipe', 'w'], // stderr
     ];
 
-    $process = @proc_open($cmd, $descriptors, $pipes);
+    // AWS CLI butuh $HOME yang valid & writable untuk cache config; user
+    // 'apache' yang menjalankan php-fpm biasanya tidak punya $HOME yang
+    // proper, jadi kita arahkan ke /tmp supaya tidak gagal karena ini.
+    $env = [
+        'HOME' => '/tmp',
+        'PATH' => getenv('PATH') ?: '/usr/bin:/bin',
+    ];
+
+    $process = @proc_open($cmd, $descriptors, $pipes, null, $env);
     if (!is_resource($process)) {
         return [-1, '', 'Gagal menjalankan proses'];
     }
@@ -70,10 +78,17 @@ function runCli(array $args): array
     return [$exitCode, trim($stdout), trim($stderr)];
 }
 
+/**
+ * Path absolut ke binary AWS CLI. Sengaja tidak pakai `which aws` karena
+ * proses PHP-FPM (biasanya jalan sebagai user 'apache'/'www-data') sering
+ * punya $PATH terbatas yang tidak mencakup /usr/bin, walau CLI-nya sendiri
+ * terpasang dan bisa dipakai lewat SSH/SSM biasa.
+ */
+const AWS_CLI_BIN = '/usr/bin/aws';
+
 function awsCliAvailable(): bool
 {
-    [$code] = runCli(['which', 'aws']);
-    return $code === 0;
+    return is_executable(AWS_CLI_BIN);
 }
 
 /**
@@ -89,7 +104,7 @@ function checkS3Cli(array $cfg): array
         return ['status' => 'unknown', 'detail' => 'AWS CLI tidak ditemukan di server'];
     }
 
-    $args = ['aws', 's3api', 'head-bucket', '--bucket', $cfg['bucket']];
+    $args = [AWS_CLI_BIN, 's3api', 'head-bucket', '--bucket', $cfg['bucket']];
     if (!empty($cfg['region'])) {
         $args[] = '--region';
         $args[] = $cfg['region'];
@@ -119,7 +134,7 @@ function checkSnsCli(array $cfg, string $region): array
         return ['status' => 'unknown', 'detail' => 'AWS CLI tidak ditemukan di server'];
     }
 
-    $args = ['aws', 'sns', 'get-topic-attributes', '--topic-arn', $topicArn];
+    $args = [AWS_CLI_BIN, 'sns', 'get-topic-attributes', '--topic-arn', $topicArn];
     if (!empty($region)) {
         $args[] = '--region';
         $args[] = $region;
