@@ -20,7 +20,6 @@ header('Content-Type: application/json');
 $full = require __DIR__ . '/../config.php';
 $dbOk = false;
 
-echo "ayeee";
 
 try {
     Database::get()->query('SELECT 1');
