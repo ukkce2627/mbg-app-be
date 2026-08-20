@@ -69,11 +69,41 @@ function runCli(array $args): array
         return [-1, '', 'Gagal menjalankan proses'];
     }
 
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
+    // Hard safety timeout (independen dari --cli-connect-timeout/--cli-read-timeout
+    // milik aws cli) supaya health check TIDAK PERNAH ikut hang lama walau ada
+    // skenario tak terduga (mis. IMDS credential lookup macet).
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+
+    $stdout = '';
+    $stderr = '';
+    $maxWaitSeconds = 8;
+    $start = microtime(true);
+
+    while (true) {
+        $status = proc_get_status($process);
+        $stdout .= stream_get_contents($pipes[1]);
+        $stderr .= stream_get_contents($pipes[2]);
+
+        if (!$status['running']) {
+            $exitCode = $status['exitcode'];
+            break;
+        }
+
+        if (microtime(true) - $start > $maxWaitSeconds) {
+            proc_terminate($process, 9);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($process);
+            return [-1, '', 'Timeout menunggu proses AWS CLI (>' . $maxWaitSeconds . 's)'];
+        }
+
+        usleep(100000); // 100ms
+    }
+
     fclose($pipes[1]);
     fclose($pipes[2]);
-    $exitCode = proc_close($process);
+    proc_close($process);
 
     return [$exitCode, trim($stdout), trim($stderr)];
 }
@@ -104,7 +134,12 @@ function checkS3Cli(array $cfg): array
         return ['status' => 'unknown', 'detail' => 'AWS CLI tidak ditemukan di server'];
     }
 
-    $args = [AWS_CLI_BIN, 's3api', 'head-bucket', '--bucket', $cfg['bucket']];
+    $args = [
+        AWS_CLI_BIN, 's3api', 'head-bucket',
+        '--bucket', $cfg['bucket'],
+        '--cli-connect-timeout', '3',
+        '--cli-read-timeout', '5',
+    ];
     if (!empty($cfg['region'])) {
         $args[] = '--region';
         $args[] = $cfg['region'];
@@ -134,7 +169,12 @@ function checkSnsCli(array $cfg, string $region): array
         return ['status' => 'unknown', 'detail' => 'AWS CLI tidak ditemukan di server'];
     }
 
-    $args = [AWS_CLI_BIN, 'sns', 'get-topic-attributes', '--topic-arn', $topicArn];
+    $args = [
+        AWS_CLI_BIN, 'sns', 'get-topic-attributes',
+        '--topic-arn', $topicArn,
+        '--cli-connect-timeout', '3',
+        '--cli-read-timeout', '5',
+    ];
     if (!empty($region)) {
         $args[] = '--region';
         $args[] = $region;
