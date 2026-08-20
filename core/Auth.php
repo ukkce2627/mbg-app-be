@@ -35,7 +35,14 @@ class Auth
     public static function login(array $user): void
     {
         self::startSession();
-        session_regenerate_id(true);
+        // CATATAN: session_regenerate_id() SENGAJA TIDAK dipakai di sini.
+        // FE meneruskan PHPSESSID miliknya sendiri ke BE lewat cURL
+        // (lihat ApiClient.php), dan BE memakai ID yang sama itu untuk
+        // session-nya. Kalau ID diregenerate di sini, ID baru cuma
+        // tersimpan di Set-Cookie response BE yang tidak pernah sampai
+        // ke browser (panggilannya server-to-server), sehingga request
+        // berikutnya dari FE selalu memakai ID lama yang datanya sudah
+        // pindah -> requireLogin() selalu gagal ("session tidak valid").
         $_SESSION['user'] = [
             'id'       => $user['id'],
             'nama'     => $user['nama'],
