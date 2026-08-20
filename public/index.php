@@ -4,6 +4,17 @@
  * Struktur path: /api/{resource}/{id?}/{subAction?}
  */
 
+// WAJIB paling atas: load Composer autoloader supaya class AWS SDK
+// (\Aws\S3\S3Client, \Aws\Sns\SnsClient) benar-benar ter-load dan
+// class_exists() di S3Uploader.php / SnsNotifier.php bisa mendeteksinya.
+// Tanpa baris ini, SDK yang sudah ter-install lewat composer TETAP TIDAK
+// TERPAKAI oleh aplikasi (selalu fallback ke lokal/log) walau vendor/
+// sudah ada di server.
+$autoload = __DIR__ . '/../vendor/autoload.php';
+if (file_exists($autoload)) {
+    require_once $autoload;
+}
+
 require_once __DIR__ . '/../core/Auth.php';
 require_once __DIR__ . '/../core/Response.php';
 require_once __DIR__ . '/../api/auth.php';
