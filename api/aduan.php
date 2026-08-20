@@ -39,7 +39,18 @@ function handle_aduan(string $method, ?string $id, ?string $subAction): void
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        Response::success($stmt->fetchAll());
+        $rows = $stmt->fetchAll();
+
+        // Ubah S3 object key yang tersimpan di file_url menjadi presigned URL
+        // yang benar-benar bisa diakses FE (bucket private, tidak ada URL
+        // publik permanen). Lihat S3Uploader::getUrl().
+        $s3 = new S3Uploader();
+        foreach ($rows as &$row) {
+            $row['file_url'] = $s3->getUrl($row['file_url'] ?? null);
+        }
+        unset($row);
+
+        Response::success($rows);
     }
 
     // POST /api/aduan — masyarakat membuat aduan baru + upload foto (memicu SNS)
@@ -54,13 +65,14 @@ function handle_aduan(string $method, ?string $id, ?string $subAction): void
             Response::error('sppg_id, kategori, dan isi wajib diisi', 'VALIDATION_ERROR', 400);
         }
 
-        $fileUrl = null;
+        $s3 = new S3Uploader();
+        $fileKey = null;
         if (!empty($_FILES['file'])) {
-            $fileUrl = (new S3Uploader())->upload($_FILES['file'], 'aduan/');
+            $fileKey = $s3->upload($_FILES['file'], 'aduan/'); // S3 object key (bucket private)
         }
 
         $stmt = $pdo->prepare('INSERT INTO aduan (user_id, sppg_id, kategori, isi, file_url) VALUES (?, ?, ?, ?, ?)');
-        $stmt->execute([$user['id'], $sppgId, $kategori, $isi, $fileUrl]);
+        $stmt->execute([$user['id'], $sppgId, $kategori, $isi, $fileKey]);
         $newId = $pdo->lastInsertId();
 
         $sppgStmt = $pdo->prepare('SELECT nama FROM sppg WHERE id = ?');
@@ -69,7 +81,9 @@ function handle_aduan(string $method, ?string $id, ?string $subAction): void
 
         (new SnsNotifier())->publish('aduan', ['sppg_nama' => $sppgNama, 'kategori' => $kategori]);
 
-        Response::success(['id' => $newId, 'file_url' => $fileUrl], 'Aduan berhasil dikirim', 201);
+        // Kirim balik presigned URL (bukan object key mentah) supaya FE bisa
+        // langsung menampilkan foto begitu aduan berhasil dikirim.
+        Response::success(['id' => $newId, 'file_url' => $s3->getUrl($fileKey)], 'Aduan berhasil dikirim', 201);
     }
 
     // PATCH /api/aduan/{id}/tanggapan — SPPG mengisi tanggapan

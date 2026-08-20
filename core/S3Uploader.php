@@ -19,17 +19,30 @@ require_once __DIR__ . '/Response.php';
 class S3Uploader
 {
     private array $cfg;
+    private ?\Aws\S3\S3Client $client = null;
 
     public function __construct()
     {
         $full = require __DIR__ . '/../config.php';
         $this->cfg = $full['s3'];
+
+        if (class_exists('\Aws\S3\S3Client') && !empty($this->cfg['bucket'])) {
+            $this->client = new \Aws\S3\S3Client([
+                'version' => 'latest',
+                'region'  => $this->cfg['region'],
+            ]);
+        }
     }
 
     /**
      * @param array  $file     Elemen dari $_FILES['field']
      * @param string $prefix   Prefix folder di bucket, mis. "aduan/" atau "laporan/"
-     * @return string          URL file yang bisa dipakai FE
+     * @return string          Nilai yang disimpan ke kolom file_url di DB:
+     *                         - kalau S3 aktif: S3 OBJECT KEY (bukan URL publik),
+     *                           karena bucket private -> akses lewat presigned URL
+     *                           yang di-generate on-demand lewat getUrl().
+     *                         - kalau fallback lokal (dev): tetap URL lokal seperti
+     *                           sebelumnya, karena fallback ini memang tidak lewat S3.
      */
     public function upload(array $file, string $prefix): string
     {
@@ -38,19 +51,20 @@ class S3Uploader
         $ext      = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         $objectKey = rtrim($prefix, '/') . '/' . bin2hex(random_bytes(16)) . '.' . $ext;
 
-        if (class_exists('\Aws\S3\S3Client') && !empty($this->cfg['bucket'])) {
-            $client = new \Aws\S3\S3Client([
-                'version' => 'latest',
-                'region'  => $this->cfg['region'],
-            ]);
-            $result = $client->putObject([
+        if ($this->client) {
+            $this->client->putObject([
                 'Bucket'     => $this->cfg['bucket'],
                 'Key'        => $objectKey,
                 'SourceFile' => $file['tmp_name'],
-                'ACL'        => 'private',
+                // CATATAN: parameter 'ACL' sengaja dihapus. Bucket S3 modern
+                // (default sejak 2023, Object Ownership = "Bucket owner
+                // enforced") menolak SEMUA request putObject yang menyertakan
+                // ACL dengan error "AccessControlListNotSupported", karena
+                // ACL memang di-disable total di level bucket. Bucket TETAP
+                // private (memang tujuannya begitu, lihat getUrl() di bawah).
                 'ContentType'=> $file['type'],
             ]);
-            return (string) $result['ObjectURL'];
+            return $objectKey;
         }
 
         // Fallback lokal (development only) — disimpan DI DALAM public/ supaya
@@ -64,6 +78,46 @@ class S3Uploader
 
         $baseDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
         return $baseDir . '/storage/' . $prefix . basename($objectKey);
+    }
+
+    /**
+     * Ubah nilai yang tersimpan di kolom file_url (S3 object key ATAU URL
+     * lokal dari fallback dev) menjadi URL yang benar-benar bisa diakses FE
+     * saat itu juga.
+     * - S3 object key -> presigned URL sementara (default berlaku 1 jam).
+     *   Digenerate baru setiap kali dipanggil, jadi selalu valid selama
+     *   objectnya masih ada di bucket, tanpa perlu bucket jadi publik.
+     * - URL lokal (fallback dev, selalu diawali '/' atau 'http') ->
+     *   dikembalikan apa adanya, karena bukan lewat S3.
+     *
+     * @param  string|null $stored             Nilai kolom file_url dari DB
+     * @param  int         $expiresInSeconds   Masa berlaku presigned URL
+     * @return string|null                     URL siap pakai, atau null kalau
+     *                                          $stored kosong / tidak bisa di-resolve
+     */
+    public function getUrl(?string $stored, int $expiresInSeconds = 3600): ?string
+    {
+        if (!$stored) return null;
+
+        // Hasil fallback lokal selalu diawali '/' (path relatif) atau 'http'
+        // (kalau suatu saat disimpan sebagai URL absolut) — bukan S3 key.
+        if (str_starts_with($stored, '/') || str_starts_with($stored, 'http')) {
+            return $stored;
+        }
+
+        if (!$this->client) {
+            // Datanya berupa S3 key tapi SDK/bucket sedang tidak tersedia
+            // (mis. config kosong) -> tidak bisa di-resolve jadi URL asli.
+            return null;
+        }
+
+        $cmd = $this->client->getCommand('GetObject', [
+            'Bucket' => $this->cfg['bucket'],
+            'Key'    => $stored,
+        ]);
+        $request = $this->client->createPresignedRequest($cmd, "+{$expiresInSeconds} seconds");
+
+        return (string) $request->getUri();
     }
 
     private function validate(array $file): void

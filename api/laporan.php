@@ -33,7 +33,15 @@ function handle_laporan(string $method, ?string $id, ?string $subAction): void
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        Response::success($stmt->fetchAll());
+        $rows = $stmt->fetchAll();
+
+        $s3 = new S3Uploader();
+        foreach ($rows as &$row) {
+            $row['file_url'] = $s3->getUrl($row['file_url'] ?? null);
+        }
+        unset($row);
+
+        Response::success($rows);
     }
 
     // POST /api/laporan — SPPG membuat laporan baru (memicu SNS)
@@ -46,13 +54,14 @@ function handle_laporan(string $method, ?string $id, ?string $subAction): void
             Response::error('jenis_laporan dan isi wajib diisi', 'VALIDATION_ERROR', 400);
         }
 
-        $fileUrl = null;
+        $s3 = new S3Uploader();
+        $fileKey = null;
         if (!empty($_FILES['file'])) {
-            $fileUrl = (new S3Uploader())->upload($_FILES['file'], 'laporan/');
+            $fileKey = $s3->upload($_FILES['file'], 'laporan/');
         }
 
         $stmt = $pdo->prepare('INSERT INTO laporan (sppg_id, jenis_laporan, isi, file_url) VALUES (?, ?, ?, ?)');
-        $stmt->execute([$user['sppg_id'], $jenis, $isi, $fileUrl]);
+        $stmt->execute([$user['sppg_id'], $jenis, $isi, $fileKey]);
         $newId = $pdo->lastInsertId();
 
         $sppgStmt = $pdo->prepare('SELECT nama FROM sppg WHERE id = ?');
@@ -61,7 +70,7 @@ function handle_laporan(string $method, ?string $id, ?string $subAction): void
 
         (new SnsNotifier())->publish('laporan', ['sppg_nama' => $sppgNama]);
 
-        Response::success(['id' => $newId, 'file_url' => $fileUrl], 'Laporan berhasil dibuat', 201);
+        Response::success(['id' => $newId, 'file_url' => $s3->getUrl($fileKey)], 'Laporan berhasil dibuat', 201);
     }
 
     // PATCH /api/laporan/{id}/status — BGN
