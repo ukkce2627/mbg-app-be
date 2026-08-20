@@ -15,11 +15,18 @@
  */
 require_once __DIR__ . '/../core/Database.php';
 
+/**
+ * Path absolut ke binary AWS CLI. Sengaja tidak pakai `which aws` karena
+ * proses PHP-FPM (biasanya jalan sebagai user 'apache'/'www-data') sering
+ * punya $PATH terbatas yang tidak mencakup /usr/bin, walau CLI-nya sendiri
+ * terpasang dan bisa dipakai lewat SSH/SSM biasa.
+ */
+const AWS_CLI_BIN = '/usr/bin/aws';
+
 header('Content-Type: application/json');
 
 $full = require __DIR__ . '/../config.php';
 $dbOk = false;
-
 
 try {
     Database::get()->query('SELECT 1');
@@ -108,14 +115,6 @@ function runCli(array $args): array
 
     return [$exitCode, trim($stdout), trim($stderr)];
 }
-
-/**
- * Path absolut ke binary AWS CLI. Sengaja tidak pakai `which aws` karena
- * proses PHP-FPM (biasanya jalan sebagai user 'apache'/'www-data') sering
- * punya $PATH terbatas yang tidak mencakup /usr/bin, walau CLI-nya sendiri
- * terpasang dan bisa dipakai lewat SSH/SSM biasa.
- */
-const AWS_CLI_BIN = '/usr/bin/aws';
 
 function awsCliAvailable(): bool
 {
