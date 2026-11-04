@@ -25,7 +25,9 @@ require_once __DIR__ . '/../api/monitoring.php';
 require_once __DIR__ . '/../api/sppg.php';
 require_once __DIR__ . '/../api/upload.php';
 
-Auth::startSession();
+// Session TIDAK lagi dibuka global di sini. Auth::login()/logout() membukanya
+// untuk menulis, Auth::currentUser() membukanya read-only. Dengan begitu
+// /health (di-poll FE tiap 20 detik) tidak membuat file session sampah.
 
 // CORS dasar — sesuaikan origin di production sesuai domain Front End
 header('Access-Control-Allow-Origin: *');

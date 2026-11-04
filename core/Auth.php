@@ -25,9 +25,22 @@ class Auth
         }
     }
 
+    private static function configureSession(): void
+    {
+        // BE memakai PHPSESSID milik FE (dikirim lewat cURL), jadi BE WAJIB
+        // menerima ID yang belum pernah dilihatnya. Kalau php.ini memakai
+        // use_strict_mode=1, ID dari FE akan dibuang dan diganti ID baru ->
+        // data login tersimpan di ID yang tidak pernah dipakai FE.
+        ini_set('session.use_strict_mode', '0');
+        // Samakan umur session dengan FE (default PHP cuma 24 menit).
+        ini_set('session.gc_maxlifetime', '28800');
+    }
+
+    /** Buka session untuk DITULIS (login/logout). */
     public static function startSession(): void
     {
         if (session_status() !== PHP_SESSION_ACTIVE) {
+            self::configureSession();
             session_start();
         }
     }
@@ -61,7 +74,12 @@ class Auth
 
     public static function currentUser(): ?array
     {
-        self::startSession();
+        // Read-only + langsung lepas lock: endpoint lambat (upload S3, publish
+        // SNS) tidak lagi menahan request lain dari session yang sama.
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            self::configureSession();
+            session_start(['read_and_close' => true]);
+        }
         return $_SESSION['user'] ?? null;
     }
 
@@ -70,7 +88,7 @@ class Auth
     {
         $user = self::currentUser();
         if (!$user) {
-            Response::error('Belum login atau session tidak valid', 'UNAUTHORIZED', 401);
+            Response::error('Belum login atau session tidak valid', 'SESSION_EXPIRED', 401);
         }
         return $user;
     }
