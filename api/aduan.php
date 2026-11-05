@@ -53,6 +53,42 @@ function handle_aduan(string $method, ?string $id, ?string $subAction): void
         Response::success($rows);
     }
 
+    // GET /api/aduan/{id} — detail satu aduan.
+    // Akses dibatasi per role: masyarakat hanya boleh melihat aduan miliknya,
+    // sppg hanya aduan untuk SPPG-nya, bgn boleh semua. Aduan milik orang lain
+    // sengaja dijawab 404 (bukan 403) supaya keberadaan ID-nya tidak bocor.
+    if ($method === 'GET' && $id && !$subAction) {
+        $user = Auth::requireLogin();
+
+        $sql = 'SELECT a.*, s.nama AS sppg_nama, u.nama AS pelapor_nama
+                FROM aduan a
+                LEFT JOIN sppg s ON s.id = a.sppg_id
+                LEFT JOIN users u ON u.id = a.user_id
+                WHERE a.id = ?';
+        $params = [(int)$id];
+
+        if ($user['role'] === 'masyarakat') {
+            $sql .= ' AND a.user_id = ?';
+            $params[] = $user['id'];
+        } elseif ($user['role'] === 'sppg') {
+            $sql .= ' AND a.sppg_id = ?';
+            $params[] = $user['sppg_id'];
+        }
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch();
+
+        if (!$row) {
+            Response::error('Aduan tidak ditemukan', 'NOT_FOUND', 404);
+        }
+
+        // Presigned URL baru setiap kali detail dibuka (berlaku 1 jam).
+        $row['file_url'] = (new S3Uploader())->getUrl($row['file_url'] ?? null);
+
+        Response::success($row);
+    }
+
     // POST /api/aduan — masyarakat membuat aduan baru + upload foto (memicu SNS)
     if ($method === 'POST' && !$id) {
         $user = Auth::requireRole(['masyarakat']);
